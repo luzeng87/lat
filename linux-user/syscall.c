@@ -121,18 +121,18 @@
 #ifdef HAVE_BTRFS_H
 #include <linux/btrfs.h>
 #endif
-#if defined(HAVE_LIBDRM_H)
-#include <libdrm/drm.h>
-#include <libdrm/i915_drm.h>
-#include <libdrm/radeon_drm.h>
-#include <libdrm/amdgpu_drm.h>
-#include <libdrm/drm_mode.h>
-#elif defined(HAVE_DRM_H)
+#if defined(HAVE_DRM_H)
 #include <drm/drm.h>
 #include <drm/i915_drm.h>
 #include <drm/radeon_drm.h>
 #include <drm/amdgpu_drm.h>
 #include <drm/drm_mode.h>
+#elif defined(HAVE_LIBDRM_H)
+#include <libdrm/drm.h>
+#include <libdrm/i915_drm.h>
+#include <libdrm/radeon_drm.h>
+#include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm_mode.h>
 #endif
 #include <linux/can/raw.h>
 #include <linux/videodev2.h>
