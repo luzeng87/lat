@@ -1412,7 +1412,15 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     }
 
     switch (insn >> 15) {
+    case 0x70ae: /* v1.1 sc.q */
+    case 0x70b0 ... 0x70bf: /* v1.1 AM* */
     case 0x70c0 ... 0x70e3: /* AM* */
+        is_write = 1;
+        break;
+    }
+    switch (insn >> 10) {
+    case 0xe15e1: /* v1.1 screl.w */
+    case 0xe15e3: /* v1.1 screl.d */
         is_write = 1;
         break;
     }
