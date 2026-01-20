@@ -717,7 +717,9 @@ bool translate_ffree(IR1_INST *pir1)
 }
 bool translate_ffreep(IR1_INST *pir1)
 {
-    return false;
+    translate_ffree(pir1);
+    tr_fpu_pop();
+    return true;
 }
 
 bool translate_fldenv(IR1_INST *pir1)
