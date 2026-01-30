@@ -882,8 +882,14 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
            which will be handled outside the cpu execution
            loop */
 #if defined(TARGET_I386)
-        CPUClass *cc = CPU_GET_CLASS(cpu);
-        cc->tcg_ops->do_interrupt(cpu);
+        if (cpu->exception_index == 0x80) {
+            CPUArchState *env = cpu->env_ptr;
+            env->eip = env->exception_next_eip;
+            env->old_exception = -1;
+        } else {
+            CPUClass *cc = CPU_GET_CLASS(cpu);
+            cc->tcg_ops->do_interrupt(cpu);
+        }
 #endif
        cpu->previous_exception_index = *ret = cpu->exception_index;
         cpu->exception_index = -1;
@@ -944,8 +950,6 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
     }
 #endif
 
-    CPUClass *cc = CPU_GET_CLASS(cpu);
-
     /* Clear the interrupt flag now since we're processing
      * cpu->interrupt_request and cpu->exit_request.
      * Ensure zeroing happens before reading cpu->exit_request or
@@ -1001,6 +1005,9 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
            True when it is, and we should restart on a new TB,
            and via longjmp via cpu_loop_exit.  */
         else {
+
+            CPUClass *cc = CPU_GET_CLASS(cpu);
+
             if (cc->tcg_ops->cpu_exec_interrupt &&
                 cc->tcg_ops->cpu_exec_interrupt(cpu, interrupt_request)) {
                 if (need_replay_interrupt(interrupt_request)) {
@@ -1094,7 +1101,6 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 /* main execution loop */
 int cpu_exec(CPUState *cpu)
 {
-    CPUClass *cc = CPU_GET_CLASS(cpu);
     int ret;
     SyncClocks sc = { 0 };
 
@@ -1107,7 +1113,9 @@ int cpu_exec(CPUState *cpu)
 
     rcu_read_lock();
 
+#ifndef CONFIG_LATX
     cpu_exec_enter(cpu);
+#endif
 
     /* Calculate difference between guest clock and host clock.
      * This delay includes the delay of the last cycle, so
@@ -1133,14 +1141,12 @@ int cpu_exec(CPUState *cpu)
          * so we only perform the workaround for clang.
          */
         cpu = current_cpu;
-        cc = CPU_GET_CLASS(cpu);
 #else
         /*
          * Non-buggy compilers preserve these locals; assert that
          * they have the correct value.
          */
         g_assert(cpu == current_cpu);
-        g_assert(cc == CPU_GET_CLASS(cpu));
 #endif
 
 #ifndef CONFIG_SOFTMMU
@@ -1189,7 +1195,9 @@ int cpu_exec(CPUState *cpu)
         }
     }
 
+#ifndef CONFIG_LATX
     cpu_exec_exit(cpu);
+#endif
     rcu_read_unlock();
 
     return ret;
