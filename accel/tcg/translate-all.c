@@ -2094,6 +2094,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #endif
     jrra_tb_reset(tb);
 #ifdef CONFIG_LATX_SMC_OPT
+    tb->smc_data = 0;
 #ifdef CONFIG_LATX_AOT
     if (in_pre_translate) {
         smc_retrans_destory();
