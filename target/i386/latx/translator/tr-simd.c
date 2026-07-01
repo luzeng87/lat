@@ -3646,6 +3646,169 @@ bool translate_pcmpestrm(IR1_INST *pir1)
     return true;
 }
 
+static void tr_gen_inline_pcmpistri_prefix_mask(IR2_OPND prefix,
+                                                IR2_OPND vec,
+                                                IR2_OPND vtmp,
+                                                IR2_OPND tmp)
+{
+    la_vor_v(vtmp, vec, vec);
+    la_vmsknz_b(vtmp, vtmp);
+    la_vpickve2gr_wu(prefix, vtmp, 0);
+    la_bstrpick_d(prefix, prefix, 15, 0);
+
+    /*
+     * Prefix mask before the first NUL:
+     *   0b...10111 -> ((mask ^ (mask + 1)) >> 1) == 0b00111
+     *   0xffff     -> 0xffff
+     */
+    la_addi_d(tmp, prefix, 1);
+    la_xor(prefix, prefix, tmp);
+    la_srli_d(prefix, prefix, 1);
+    la_bstrpick_d(prefix, prefix, 15, 0);
+}
+
+static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
+                                           IR2_OPND prefix_d,
+                                           IR2_OPND prefix_s)
+{
+    IR2_OPND tmp = ra_alloc_itemp();
+    IR2_OPND flags = ra_alloc_itemp();
+
+    /*
+     * CF = res != 0, OF = res[0], ZF/SF indicate whether src/dst contain
+     * a NUL in the first 16 bytes. AF/PF are cleared.
+     */
+    la_mov64(flags, zero_ir2_opnd);
+    la_sltu(tmp, zero_ir2_opnd, res);
+    la_or(flags, flags, tmp);
+
+    la_andi(tmp, res, 1);
+    la_bstrins_w(flags, tmp, OF_BIT_INDEX, OF_BIT_INDEX);
+
+    li_d(tmp, 0xffff);
+    la_xor(tmp, prefix_s, tmp);
+    la_sltu(tmp, zero_ir2_opnd, tmp);
+    la_bstrins_w(flags, tmp, ZF_BIT_INDEX, ZF_BIT_INDEX);
+
+    li_d(tmp, 0xffff);
+    la_xor(tmp, prefix_d, tmp);
+    la_sltu(tmp, zero_ir2_opnd, tmp);
+    la_bstrins_w(flags, tmp, SF_BIT_INDEX, SF_BIT_INDEX);
+
+    la_x86mtflag(flags, CF_USEDEF_BIT | PF_USEDEF_BIT | AF_USEDEF_BIT |
+                        ZF_USEDEF_BIT | SF_USEDEF_BIT | OF_USEDEF_BIT);
+
+    /* ECX = res ? ctz(res) : 16 */
+    la_ctz_w(tmp, res);
+    la_addi_d(flags, zero_ir2_opnd, 16);
+    la_maskeqz(tmp, tmp, res);
+    la_masknez(flags, flags, res);
+    la_or(tmp, tmp, flags);
+    la_mov64(ra_alloc_gpr(ecx_index), tmp);
+
+    ra_free_temp(flags);
+    ra_free_temp(tmp);
+}
+
+static void tr_gen_inline_pcmpistri_equal_each_negative(IR2_OPND vd,
+                                                        IR2_OPND vs)
+{
+    IR2_OPND vd_nz = ra_alloc_ftemp();
+    IR2_OPND vs_nz = ra_alloc_ftemp();
+    IR2_OPND vcmp = ra_alloc_ftemp();
+
+    IR2_OPND eq_mask = ra_alloc_itemp();
+    IR2_OPND prefix_d = ra_alloc_itemp();
+    IR2_OPND prefix_s = ra_alloc_itemp();
+    IR2_OPND res = ra_alloc_itemp();
+    IR2_OPND tmp = ra_alloc_itemp();
+
+    la_vseq_b(vcmp, vd, vs);
+    la_vmsknz_b(vcmp, vcmp);
+    la_vpickve2gr_wu(eq_mask, vcmp, 0);
+    la_bstrpick_d(eq_mask, eq_mask, 15, 0);
+
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_d, vd, vd_nz, tmp);
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_s, vs, vs_nz, tmp);
+
+    ra_free_temp(vcmp);
+    ra_free_temp(vs_nz);
+    ra_free_temp(vd_nz);
+    ra_free_temp(tmp);
+
+    la_or(res, prefix_d, prefix_s);
+    la_nor(eq_mask, eq_mask, zero_ir2_opnd);
+    la_bstrpick_d(eq_mask, eq_mask, 15, 0);
+    la_and(res, res, eq_mask);
+
+    tr_gen_inline_pcmpistri_finish(res, prefix_d, prefix_s);
+
+    ra_free_temp(res);
+    ra_free_temp(prefix_s);
+    ra_free_temp(prefix_d);
+    ra_free_temp(eq_mask);
+}
+
+static void tr_gen_inline_pcmpistri_self_nul_probe(IR2_OPND vd)
+{
+    IR2_OPND vtmp = ra_alloc_ftemp();
+    IR2_OPND prefix = ra_alloc_itemp();
+    IR2_OPND res = ra_alloc_itemp();
+    IR2_OPND tmp = ra_alloc_itemp();
+
+    tr_gen_inline_pcmpistri_prefix_mask(prefix, vd, vtmp, tmp);
+    ra_free_temp(vtmp);
+    ra_free_temp(tmp);
+
+    la_nor(res, prefix, zero_ir2_opnd);
+    la_bstrpick_d(res, res, 15, 0);
+
+    tr_gen_inline_pcmpistri_finish(res, prefix, prefix);
+
+    ra_free_temp(res);
+    ra_free_temp(prefix);
+}
+
+/*
+ * glibc string fast paths use:
+ *   pcmpistri xmm, xmm/m128, 0x18/0x1a
+ *     Equal Each, negative polarity, least-significant index.
+ *     0x18 vs 0x1a differs only in unsigned/signed byte elements, which does
+ *     not change byte equality.
+ *   pcmpistri xmm, xmm, 0x3a
+ *     Equal Each, masked negative polarity, least-significant index.  glibc
+ *     uses only the self-compare form as a NUL-position probe.
+ *
+ * Other modes have different aggregation/polarity/index semantics and stay on
+ * the helper path.
+ */
+static bool tr_gen_inline_pcmpistri(IR1_INST *pir1, IR2_OPND vd, IR2_OPND vs,
+                                    int ctrl)
+{
+    if (ctrl == 0x18 || ctrl == 0x1a) {
+        tr_gen_inline_pcmpistri_equal_each_negative(vd, vs);
+        return true;
+    }
+
+    if (ctrl == 0x3a) {
+        IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+        IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+        if (ir1_opnd_is_xmm(opnd1) &&
+            ir1_opnd_base_reg_num(opnd0) == ir1_opnd_base_reg_num(opnd1)) {
+            tr_gen_inline_pcmpistri_self_nul_probe(vd);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool tr_pcmpistri_mem_can_inline(int ctrl)
+{
+    return ctrl == 0x18 || ctrl == 0x1a;
+}
+
 #ifndef CONFIG_LATX_AVX_OPT
 bool translate_pcmpistri(IR1_INST *pir1)
 #else
@@ -3659,8 +3822,18 @@ bool translate_vpcmpistri(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistri_xmm, d, s, imm,
-                LOAD_HELPER_PCMPISTRI_XMM);
+        IR2_OPND vd = ra_alloc_xmm(d);
+        IR2_OPND vs = ra_alloc_xmm(s);
+        if (!tr_gen_inline_pcmpistri(pir1, vd, vs, imm)) {
+            tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistri_xmm, d, s, imm,
+                    LOAD_HELPER_PCMPISTRI_XMM);
+        }
+    } else if (tr_pcmpistri_mem_can_inline(imm)) {
+        IR2_OPND vd = ra_alloc_xmm(d);
+        IR2_OPND vs = ra_alloc_ftemp();
+        load_freg128_from_ir1_mem(vs, opnd1);
+        tr_gen_inline_pcmpistri(pir1, vd, vs, imm);
+        ra_free_temp(vs);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 8);
