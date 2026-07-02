@@ -683,6 +683,8 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
 
     IR2_OPND label_slow = ra_alloc_label();
     IR2_OPND label_no_overlap = ra_alloc_label();
+    IR2_OPND label_block_done = ra_alloc_label();
+    IR2_OPND label_block_loop = ra_alloc_label();
     IR2_OPND label_qword_done = ra_alloc_label();
     IR2_OPND label_qword_loop = ra_alloc_label();
     IR2_OPND label_tail_done = ra_alloc_label();
@@ -691,6 +693,10 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     IR2_OPND tail = ra_alloc_itemp();
     IR2_OPND value = ra_alloc_itemp();
     IR2_OPND overlap = ra_alloc_itemp();
+    IR2_OPND vec0 = ra_alloc_ftemp();
+    IR2_OPND vec1 = ra_alloc_ftemp();
+    IR2_OPND vec2 = ra_alloc_ftemp();
+    IR2_OPND vec3 = ra_alloc_ftemp();
 
     tr_emit_rep_string_df_guard(label_slow);
 
@@ -699,8 +705,27 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     la_bltu(overlap, rcx_opnd, label_slow);
 
     la_label(label_no_overlap);
-    la_srli_d(qwords, rcx_opnd, 3);
-    la_andi(tail, rcx_opnd, 7);
+    la_srli_d(qwords, rcx_opnd, 6);
+    la_andi(tail, rcx_opnd, 63);
+
+    la_beq(qwords, zero_ir2_opnd, label_block_done);
+    la_label(label_block_loop);
+    la_vld(vec0, rsi_opnd, 0);
+    la_vld(vec1, rsi_opnd, 16);
+    la_vld(vec2, rsi_opnd, 32);
+    la_vld(vec3, rsi_opnd, 48);
+    la_vst(vec0, rdi_opnd, 0);
+    la_vst(vec1, rdi_opnd, 16);
+    la_vst(vec2, rdi_opnd, 32);
+    la_vst(vec3, rdi_opnd, 48);
+    la_addi_d(rsi_opnd, rsi_opnd, 64);
+    la_addi_d(rdi_opnd, rdi_opnd, 64);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_block_loop);
+
+    la_label(label_block_done);
+    la_srli_d(qwords, tail, 3);
+    la_andi(tail, tail, 7);
 
     la_beq(qwords, zero_ir2_opnd, label_qword_done);
     la_label(label_qword_loop);
@@ -730,6 +755,10 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     ra_free_temp(tail);
     ra_free_temp(value);
     ra_free_temp(overlap);
+    ra_free_temp(vec0);
+    ra_free_temp(vec1);
+    ra_free_temp(vec2);
+    ra_free_temp(vec3);
     return true;
 }
 
@@ -754,6 +783,8 @@ static bool tr_emit_fast_rep_stosb(IR1_INST *pir1, IR2_OPND rdi_opnd,
     }
 
     IR2_OPND label_slow = ra_alloc_label();
+    IR2_OPND label_block_done = ra_alloc_label();
+    IR2_OPND label_block_loop = ra_alloc_label();
     IR2_OPND label_qword_done = ra_alloc_label();
     IR2_OPND label_qword_loop = ra_alloc_label();
     IR2_OPND label_tail_done = ra_alloc_label();
@@ -762,12 +793,32 @@ static bool tr_emit_fast_rep_stosb(IR1_INST *pir1, IR2_OPND rdi_opnd,
     IR2_OPND tail = ra_alloc_itemp();
     IR2_OPND fill = ra_alloc_itemp();
     IR2_OPND tmp = ra_alloc_itemp();
+    IR2_OPND vfill = ra_alloc_ftemp();
 
     tr_emit_rep_string_df_guard(label_slow);
 
     tr_replicate_byte_to_dword(fill, value_opnd, tmp);
-    la_srli_d(qwords, rcx_opnd, 3);
-    la_andi(tail, rcx_opnd, 7);
+    la_vreplgr2vr_b(vfill, value_opnd);
+    la_srli_d(qwords, rcx_opnd, 7);
+    la_andi(tail, rcx_opnd, 127);
+
+    la_beq(qwords, zero_ir2_opnd, label_block_done);
+    la_label(label_block_loop);
+    la_vst(vfill, rdi_opnd, 0);
+    la_vst(vfill, rdi_opnd, 16);
+    la_vst(vfill, rdi_opnd, 32);
+    la_vst(vfill, rdi_opnd, 48);
+    la_vst(vfill, rdi_opnd, 64);
+    la_vst(vfill, rdi_opnd, 80);
+    la_vst(vfill, rdi_opnd, 96);
+    la_vst(vfill, rdi_opnd, 112);
+    la_addi_d(rdi_opnd, rdi_opnd, 128);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_block_loop);
+
+    la_label(label_block_done);
+    la_srli_d(qwords, tail, 3);
+    la_andi(tail, tail, 7);
 
     la_beq(qwords, zero_ir2_opnd, label_qword_done);
     la_label(label_qword_loop);
@@ -793,6 +844,7 @@ static bool tr_emit_fast_rep_stosb(IR1_INST *pir1, IR2_OPND rdi_opnd,
     ra_free_temp(tail);
     ra_free_temp(fill);
     ra_free_temp(tmp);
+    ra_free_temp(vfill);
     return true;
 }
 #endif
