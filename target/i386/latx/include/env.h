@@ -58,6 +58,10 @@ typedef struct TRANSLATION_DATA {
 
     int curr_top;               /* top value (changes when translating) */
 
+    /* Read-only AES table address retained across consecutive AES rounds. */
+    int aes_table_reg;
+    uint8_t aes_table_kind;
+
     /* TODO : support static translation */
     uint8 curr_ir1_skipped_eflags; /* these eflag calculation can be skipped */
                                    /* (because of flag pattern, etc) */

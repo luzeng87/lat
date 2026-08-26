@@ -107,6 +107,7 @@ void tr_init(void *tb)
               t->curr_tb);
     t->curr_tb = tb;
     t->curr_ir1_inst = NULL;
+    t->aes_table_kind = 0;
 
     /* register allocation init */
     ra_free_all();
@@ -1867,6 +1868,12 @@ static bool (*translate_functions[])(IR1_INST *) = {
 
 bool ir1_translate(IR1_INST *ir1)
 {
+    TRANSLATION_DATA *t = lsenv->tr_data;
+
+    if (ir1_opcode(ir1) != dt_X86_INS_AESENC &&
+        ir1_opcode(ir1) != dt_X86_INS_AESENCLAST) {
+        t->aes_table_kind = 0;
+    }
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (try_translate_instptn(ir1)) {
         ra_free_all();
