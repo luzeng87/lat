@@ -294,7 +294,7 @@ bool jrra_translate_ret(TranslationBlock *tb, IR2_OPND return_addr_opnd,
         IR2_OPND saved_x86_pc = ra_alloc_itemp();
         IR2_OPND target_label_opnd = ra_alloc_label();
 
-        PER_TB_COUNT((void *)&((tb->profile).jrra_in), 1);
+        PER_TB_COUNT(tb, LATX_PROFILE_JRRA_IN, 1);
 
         la_scr2gr(saved_x86_pc, scr0);
         la_bne(saved_x86_pc, return_addr_opnd, target_label_opnd);
@@ -302,7 +302,7 @@ bool jrra_translate_ret(TranslationBlock *tb, IR2_OPND return_addr_opnd,
         la_jirl(zero_ir2_opnd, saved_x86_pc, 0);
         la_label(target_label_opnd);
 
-        PER_TB_COUNT((void *)&((tb->profile).jrra_miss), 1);
+        PER_TB_COUNT(tb, LATX_PROFILE_JRRA_MISS, 1);
     }
     if (option_jr_ra_stack) {
         la_jirl(zero_ir2_opnd, return_addr_opnd, 0);

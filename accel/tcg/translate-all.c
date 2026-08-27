@@ -77,6 +77,9 @@
 #include "aot_smc.h"
 #include "aot_page.h"
 #include "jrra.h"
+#ifdef CONFIG_LATX_PROFILER
+#include "profile-runtime.h"
+#endif
 #include "accel/tcg/internal.h"
 #include "ts.h"
 #include "latx-smc.h"
@@ -2799,11 +2802,14 @@ struct tb_exec_stats {
 static void tb_stats_copy(const TranslationBlock *tb, void *ptr)
 {
     struct tb_exec_stats *stats = (struct tb_exec_stats *)ptr;
-    uint64_t exec_times = GET_TB_PROFILE(tb, exec_times);
+    uint64_t exec_times = latx_profile_read(tb->pc, LATX_PROFILE_EXEC);
     uint64_t ir2_num = GET_TB_PROFILE(tb, nr_code);
     uint64_t eflags_gen = GET_TB_PROFILE(tb, sta_generate);
     uint64_t eflags_eli = GET_TB_PROFILE(tb, sta_eliminate);
     memcpy(&(stats->profile), &(tb->profile), sizeof(TBProfile));
+    stats->profile.exec_times = exec_times;
+    stats->profile.jrra_in = latx_profile_read(tb->pc, LATX_PROFILE_JRRA_IN);
+    stats->profile.jrra_miss = latx_profile_read(tb->pc, LATX_PROFILE_JRRA_MISS);
 
     stats->pc = tb->pc;
     stats->end_pc = tb->pc + tb->size;
@@ -2885,12 +2891,12 @@ static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
         }
     }
 #ifdef CONFIG_LATX_PROFILER
-    uint64_t exec_times = GET_TB_PROFILE(tb, exec_times);
+    uint64_t exec_times = latx_profile_read(tb->pc, LATX_PROFILE_EXEC);
     tst->dynamic_insts  += GET_TB_PROFILE(tb, nr_code) * exec_times;
     tst->exec_times     += exec_times;
     tst->exit_times     += GET_TB_PROFILE(tb, exit_times);
-    tst->jrra_in        += GET_TB_PROFILE(tb, jrra_in);
-    tst->jrra_miss      += GET_TB_PROFILE(tb, jrra_miss);
+    tst->jrra_in        += latx_profile_read(tb->pc, LATX_PROFILE_JRRA_IN);
+    tst->jrra_miss      += latx_profile_read(tb->pc, LATX_PROFILE_JRRA_MISS);
 
     tst->sta_eliminate  += GET_TB_PROFILE(tb, sta_eliminate) * exec_times;
     tst->sta_generate   += GET_TB_PROFILE(tb, sta_generate) * exec_times;
@@ -2902,6 +2908,12 @@ static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
     g_array_append_val(tst->tb_execinfo, tb_stats);
 #endif
     return false;
+}
+
+static void tb_qht_stats_iter(void *value, uint32_t hash, void *data)
+{
+    (void)hash;
+    tb_tree_stats_iter(NULL, value, data);
 }
 #endif
 
@@ -3020,7 +3032,7 @@ void dump_exec_info(void)
 #endif
     qemu_log("\n");
     qemu_log("[Profile] ===== Summary =====\n");
-    tcg_tb_foreach(tb_tree_stats_iter, &tst);
+    qht_iter(&tb_ctx.htable, tb_qht_stats_iter, &tst);
     nb_tbs = tst.nb_tbs;
     /* show all tb exec information */
     tb_exec_dump_info((void *)&tst);

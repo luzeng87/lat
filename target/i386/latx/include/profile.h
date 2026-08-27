@@ -11,19 +11,16 @@
 #include "env.h"
 #include "reg-alloc.h"
 #include "translate.h"
+#include "profile-runtime.h"
 
-/**
- * @brief Add a per tb counter stub
- * @param area Record area in memory
- * @param inc Record add number (can be negative)
- */
-void per_tb_count(void *area, int inc);
+void latx_profile_init(CPUX86State *env);
+void per_tb_count(target_ulong pc, LatxTBProfileCounter counter, int inc);
 
 #ifdef CONFIG_LATX_PROFILER
-#define PER_TB_COUNT(area, inc) \
-    per_tb_count((area), (inc))
+#define PER_TB_COUNT(tb, counter, inc) \
+    per_tb_count((tb)->pc, (counter), (inc))
 #else
-#define PER_TB_COUNT(area, inc) ((void)0)
+#define PER_TB_COUNT(tb, counter, inc) ((void)0)
 #endif
 
 #endif

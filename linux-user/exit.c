@@ -52,8 +52,8 @@ void preexit_cleanup(CPUArchState *env, int code)
         __gcov_dump();
 #endif
 #ifdef CONFIG_LATX_PROFILER
-        if (qemu_loglevel_mask(LAT_LOG_PROFILE))
-            dump_exec_info();
+        qemu_set_log(LAT_LOG_PROFILE);
+        dump_exec_info();
 #endif
         gdb_exit(code);
         qemu_plugin_atexit_cb();

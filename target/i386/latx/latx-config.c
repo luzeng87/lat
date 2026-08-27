@@ -651,6 +651,9 @@ void latx_lsenv_init(CPUArchState *env)
     lsenv = &lsenv_real;
     lsenv->cpu_state = env;
     lsenv->tr_data = &tr_data_real;
+#ifdef CONFIG_LATX_PROFILER
+    latx_profile_init(env);
+#endif
 #ifdef CONFIG_LATX_TU
     tu_control_init();
 #endif
