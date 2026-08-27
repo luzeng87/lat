@@ -45,4 +45,5 @@ run_aot()
 run_aot aes-rounds
 run_aot vaes-xmm-rounds
 run_aot vaes-ymm-rounds
-echo "PASS: AES, VEX AES, and VAES YMM JIT/cold-AOT/hot-AOT"
+run_aot vex128-ymmh-zero
+echo "PASS: AES, VEX AES, VAES YMM, and VEX.128 YMM-high zeroing JIT/cold-AOT/hot-AOT"

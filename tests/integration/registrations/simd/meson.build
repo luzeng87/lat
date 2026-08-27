@@ -8,6 +8,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../aesenc-all-bytes.S'),
       files('../../vaes-xmm-rounds.S'),
       files('../../vaes-ymm-rounds.S'),
+      files('../../vex128-ymmh-zero.S'),
     ],
     'timeout': 120,
   }]

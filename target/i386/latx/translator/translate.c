@@ -108,6 +108,8 @@ void tr_init(void *tb)
     t->curr_tb = tb;
     t->curr_ir1_inst = NULL;
     t->aes_table_kind = 0;
+    t->ymmh_zero_pending = 0;
+    t->ymmh_zero_defer_disabled = 0;
 
     /* register allocation init */
     ra_free_all();
@@ -1872,6 +1874,26 @@ bool ir1_translate(IR1_INST *ir1)
 {
     TRANSLATION_DATA *t = lsenv->tr_data;
 
+    /* Keep the clear in the TB body; TU/AOT may replace generated exits. */
+    if (ir1_is_tb_ending(ir1)) {
+        materialize_deferred_ymmh_zeros_now();
+    }
+
+    if (option_enable_lasx && !t->ymmh_zero_defer_disabled) {
+        int opnd_num = ir1_get_opnd_num(ir1);
+
+        for (int i = 0; i < opnd_num; ++i) {
+            if (ir1_opnd_size(ir1_get_opnd(ir1, i)) == 256) {
+                /*
+                 * A 256-bit operation can observe or replace a physical
+                 * high half.  Keep mixed XMM/YMM TBs conservative.
+                 */
+                disable_deferred_ymmh_zero_for_tb();
+                break;
+            }
+        }
+    }
+
     if (ir1_opcode(ir1) != dt_X86_INS_AESENC &&
         ir1_opcode(ir1) != dt_X86_INS_AESENCLAST
 #ifdef CONFIG_LATX_AVX_OPT
@@ -2623,6 +2645,7 @@ static void tr_generate_single_step_exit(IR2_OPND next_pc)
 {
     IR2_OPND helper_addr = ra_alloc_itemp();
 
+    materialize_deferred_ymmh_zeros_for_exit();
     la_store_addrx(next_pc, env_ir2_opnd, lsenv_offset_of_eip(lsenv));
     tr_save_registers_to_env(0xff, 0xff, option_save_xmm,
                              options_to_save());
@@ -2641,6 +2664,7 @@ void tr_generate_exit_tb_to_next(IR1_INST *ir1)
     IR2_OPND next_pc = ra_alloc_dbt_arg2();
     target_ulong call_offset = aot_get_call_offset(ir1_addr_next(ir1));
 
+    materialize_deferred_ymmh_zeros_for_exit();
     aot_load_guest_addr(next_pc, ir1_addr_next(ir1), LOAD_CALL_TARGET,
                         call_offset);
 
@@ -2669,6 +2693,7 @@ void tr_generate_exit_stub_tb(IR1_INST *branch, int succ_id, void *func, IR1_INS
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
 #endif
 {
+    materialize_deferred_ymmh_zeros_for_exit();
     TRANSLATION_DATA *t_data = lsenv->tr_data;
     (void)t_data;
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
@@ -3592,6 +3617,7 @@ void tr_save_xmm_to_env(uint8 xmm_to_save)
 #ifndef TARGET_X86_64
     for (int i = 0; i < 8; i++) {
         if (BITS_ARE_SET(xmm_to_save, 1 << i)) {
+            materialize_deferred_ymmh_zero(ra_alloc_xmm(i));
             if (option_enable_lasx) {
                 la_xvst(ra_alloc_xmm(i),
                                      env_ir2_opnd, lsenv_offset_of_xmm(lsenv, i));
@@ -3607,6 +3633,7 @@ void tr_save_xmm_to_env(uint8 xmm_to_save)
     la_addi_d(tmp_env_opnd, env_ir2_opnd, 0x7f0);
     for (int i = 0; i < 8; i++) {
         if (BITS_ARE_SET(xmm_to_save, 1 << i)) {
+            materialize_deferred_ymmh_zero(ra_alloc_xmm(i));
             if (option_enable_lasx) {
                 la_xvst(ra_alloc_xmm(i),
                                      tmp_env_opnd, lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
@@ -3658,6 +3685,7 @@ void tr_save_xmm64_to_env(uint8 xmm_to_save)
     la_addi_d(tmp_env_opnd, env_ir2_opnd, 0x7f0);
     for (int i = 0; i < 8; i++) {
         if (BITS_ARE_SET(xmm_to_save, 1 << i)) {
+            materialize_deferred_ymmh_zero(ra_alloc_xmm(i + 8));
             if (option_enable_lasx) {
                 la_xvst(ra_alloc_xmm(i + 8), tmp_env_opnd,
                     lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
